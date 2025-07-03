@@ -122,6 +122,17 @@ func (m *Manager) CreateAndStartContainer(ctx context.Context, cfg *config.Confi
 	// Get environment variables
 	env := os.Environ()
 
+	// Add host user information
+	if uid := os.Getuid(); uid >= 0 {
+		env = append(env, fmt.Sprintf("HOST_UID=%d", uid))
+	}
+	if gid := os.Getgid(); gid >= 0 {
+		env = append(env, fmt.Sprintf("HOST_GID=%d", gid))
+	}
+	if user := os.Getenv("USER"); user != "" {
+		env = append(env, fmt.Sprintf("HOST_USER=%s", user))
+	}
+
 	// Prepare init commands
 	initCommands := []string{}
 	for _, cmd := range cfg.Init {
