@@ -1,6 +1,8 @@
 package assets
 
-import _ "embed"
+import (
+	_ "embed"
+)
 
 //go:embed Dockerfile
 var DockerfileContent string
