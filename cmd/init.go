@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/mohemohe/claudeway/internal/assets"
 	"github.com/mohemohe/claudeway/internal/config"
 )
 
@@ -59,7 +60,7 @@ func initGlobalConfig() error {
 	// Create or confirm overwrite for Docker assets
 	dockerfilePath := filepath.Join(libDir, "Dockerfile")
 	if shouldWriteFile(dockerfilePath, "Dockerfile") {
-		if err := writeDockerfile(dockerfilePath); err != nil {
+		if err := os.WriteFile(dockerfilePath, []byte(assets.DockerfileContent), 0644); err != nil {
 			return fmt.Errorf("failed to write Dockerfile: %w", err)
 		}
 		fmt.Printf("Created %s\n", dockerfilePath)
@@ -67,7 +68,7 @@ func initGlobalConfig() error {
 
 	entrypointPath := filepath.Join(libDir, "entrypoint.sh")
 	if shouldWriteFile(entrypointPath, "entrypoint.sh") {
-		if err := writeEntrypoint(entrypointPath); err != nil {
+		if err := os.WriteFile(entrypointPath, []byte(assets.EntrypointContent), 0755); err != nil {
 			return fmt.Errorf("failed to write entrypoint.sh: %w", err)
 		}
 		fmt.Printf("Created %s\n", entrypointPath)
@@ -100,136 +101,3 @@ func shouldWriteFile(path, name string) bool {
 	return true
 }
 
-func writeDockerfile(path string) error {
-	content := `FROM ubuntu:22.04
-
-# Set environment variables
-ENV DEBIAN_FRONTEND=noninteractive
-ENV ASDF_DIR=/opt/asdf
-ENV PATH="${ASDF_DIR}/bin:${ASDF_DIR}/shims:${PATH}"
-
-# Install basic dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    git \
-    build-essential \
-    libssl-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    wget \
-    llvm \
-    libncurses5-dev \
-    libncursesw5-dev \
-    xz-utils \
-    tk-dev \
-    libffi-dev \
-    liblzma-dev \
-    unzip \
-    rsync \
-    sudo \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install asdf
-RUN git clone https://github.com/asdf-vm/asdf.git ${ASDF_DIR} --branch v0.14.0 && \
-    echo '. /opt/asdf/asdf.sh' >> /etc/bash.bashrc && \
-    echo '. /opt/asdf/completions/asdf.bash' >> /etc/bash.bashrc
-
-# Install commonly used asdf plugins
-RUN . ${ASDF_DIR}/asdf.sh && \
-    asdf plugin add nodejs && \
-    asdf plugin add python && \
-    asdf plugin add golang && \
-    asdf plugin add ruby && \
-    asdf plugin add java
-
-# Create host directory for copy operations
-RUN mkdir -p /host
-
-# Copy entrypoint script
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
-
-# Set working directory
-WORKDIR /workspace
-
-# Set entrypoint
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-
-# Default command
-CMD ["/bin/bash"]`
-
-	return os.WriteFile(path, []byte(content), 0644)
-}
-
-func writeEntrypoint(path string) error {
-	content := `#!/bin/bash
-set -e
-
-# Function to expand tilde in paths
-expand_path() {
-    local path="$1"
-    if [[ "$path" == "~/"* ]]; then
-        echo "${HOME}/${path:2}"
-    else
-        echo "$path"
-    fi
-}
-
-# Copy files specified in CLAUDEWAY_COPY
-if [ -n "$CLAUDEWAY_COPY" ]; then
-    echo "Copying specified files..."
-    IFS=';' read -ra COPY_FILES <<< "$CLAUDEWAY_COPY"
-    for file in "${COPY_FILES[@]}"; do
-        # Expand path
-        expanded_file=$(expand_path "$file")
-        
-        # Get absolute path
-        if [[ "$expanded_file" = /* ]]; then
-            abs_path="$expanded_file"
-        else
-            abs_path="$(pwd)/$expanded_file"
-        fi
-        
-        # Source path in /host
-        src_path="/host$abs_path"
-        
-        # Create parent directory if needed
-        parent_dir=$(dirname "$abs_path")
-        if [ ! -d "$parent_dir" ]; then
-            mkdir -p "$parent_dir"
-        fi
-        
-        # Copy the file/directory
-        if [ -e "$src_path" ]; then
-            if [ -d "$src_path" ]; then
-                cp -r "$src_path" "$abs_path"
-                echo "  Copied directory: $file -> $abs_path"
-            else
-                cp "$src_path" "$abs_path"
-                echo "  Copied file: $file -> $abs_path"
-            fi
-        else
-            echo "  Warning: Source not found: $src_path"
-        fi
-    done
-fi
-
-# Run initialization commands
-if [ -n "$CLAUDEWAY_INIT" ]; then
-    echo "Running initialization commands..."
-    IFS=';' read -ra INIT_COMMANDS <<< "$CLAUDEWAY_INIT"
-    for cmd in "${INIT_COMMANDS[@]}"; do
-        echo "  Running: $cmd"
-        bash -c "$cmd" || {
-            echo "  Warning: Command failed: $cmd"
-        }
-    done
-fi
-
-# Execute the main command
-exec "$@"`
-
-	return os.WriteFile(path, []byte(content), 0755)
-}

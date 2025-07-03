@@ -12,6 +12,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
+	"github.com/mohemohe/claudeway/internal/assets"
 	"github.com/mohemohe/claudeway/internal/config"
 )
 
@@ -148,65 +149,8 @@ func createBuildContextEmbedded() (io.Reader, error) {
 	tw := tar.NewWriter(&buf)
 	defer tw.Close()
 
-	// Embed Dockerfile content
-	dockerfileContent := `FROM ubuntu:22.04
-
-# Set environment variables
-ENV DEBIAN_FRONTEND=noninteractive
-ENV ASDF_DIR=/opt/asdf
-ENV PATH="${ASDF_DIR}/bin:${ASDF_DIR}/shims:${PATH}"
-
-# Install basic dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    git \
-    build-essential \
-    libssl-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    wget \
-    llvm \
-    libncurses5-dev \
-    libncursesw5-dev \
-    xz-utils \
-    tk-dev \
-    libffi-dev \
-    liblzma-dev \
-    unzip \
-    rsync \
-    sudo \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install asdf
-RUN git clone https://github.com/asdf-vm/asdf.git ${ASDF_DIR} --branch v0.14.0 && \
-    echo '. /opt/asdf/asdf.sh' >> /etc/bash.bashrc && \
-    echo '. /opt/asdf/completions/asdf.bash' >> /etc/bash.bashrc
-
-# Install commonly used asdf plugins
-RUN . ${ASDF_DIR}/asdf.sh && \
-    asdf plugin add nodejs && \
-    asdf plugin add python && \
-    asdf plugin add golang && \
-    asdf plugin add ruby && \
-    asdf plugin add java
-
-# Create host directory for copy operations
-RUN mkdir -p /host
-
-# Copy entrypoint script
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
-
-# Set working directory
-WORKDIR /workspace
-
-# Set entrypoint
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-
-# Default command
-CMD ["/bin/bash"]`
+	// Use embedded Dockerfile content
+	dockerfileContent := assets.DockerfileContent
 
 	// Add Dockerfile
 	header := &tar.Header{
@@ -221,73 +165,8 @@ CMD ["/bin/bash"]`
 		return nil, fmt.Errorf("failed to write Dockerfile content: %w", err)
 	}
 
-	// Embed entrypoint script content
-	entrypointContent := `#!/bin/bash
-set -e
-
-# Function to expand tilde in paths
-expand_path() {
-    local path="$1"
-    if [[ "$path" == "~/"* ]]; then
-        echo "${HOME}/${path:2}"
-    else
-        echo "$path"
-    fi
-}
-
-# Copy files specified in CLAUDEWAY_COPY
-if [ -n "$CLAUDEWAY_COPY" ]; then
-    echo "Copying specified files..."
-    IFS=';' read -ra COPY_FILES <<< "$CLAUDEWAY_COPY"
-    for file in "${COPY_FILES[@]}"; do
-        # Expand path
-        expanded_file=$(expand_path "$file")
-        
-        # Get absolute path
-        if [[ "$expanded_file" = /* ]]; then
-            abs_path="$expanded_file"
-        else
-            abs_path="$(pwd)/$expanded_file"
-        fi
-        
-        # Source path in /host
-        src_path="/host$abs_path"
-        
-        # Create parent directory if needed
-        parent_dir=$(dirname "$abs_path")
-        if [ ! -d "$parent_dir" ]; then
-            mkdir -p "$parent_dir"
-        fi
-        
-        # Copy the file/directory
-        if [ -e "$src_path" ]; then
-            if [ -d "$src_path" ]; then
-                cp -r "$src_path" "$abs_path"
-                echo "  Copied directory: $file -> $abs_path"
-            else
-                cp "$src_path" "$abs_path"
-                echo "  Copied file: $file -> $abs_path"
-            fi
-        else
-            echo "  Warning: Source not found: $src_path"
-        fi
-    done
-fi
-
-# Run initialization commands
-if [ -n "$CLAUDEWAY_INIT" ]; then
-    echo "Running initialization commands..."
-    IFS=';' read -ra INIT_COMMANDS <<< "$CLAUDEWAY_INIT"
-    for cmd in "${INIT_COMMANDS[@]}"; do
-        echo "  Running: $cmd"
-        bash -c "$cmd" || {
-            echo "  Warning: Command failed: $cmd"
-        }
-    done
-fi
-
-# Execute the main command
-exec "$@"`
+	// Use embedded entrypoint script content
+	entrypointContent := assets.EntrypointContent
 
 	// Add entrypoint script
 	scriptHeader := &tar.Header{
