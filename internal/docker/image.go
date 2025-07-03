@@ -15,24 +15,34 @@ import (
 	"github.com/mohemohe/claudeway/internal/config"
 )
 
+type BuildOptions struct {
+	NoCache bool
+}
+
 func BuildImage(ctx context.Context) error {
+	return BuildImageWithOptions(ctx, BuildOptions{})
+}
+
+func BuildImageWithOptions(ctx context.Context, options BuildOptions) error {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return fmt.Errorf("failed to create docker client: %w", err)
 	}
 	defer cli.Close()
 
-	// Check if image already exists
-	images, err := cli.ImageList(ctx, types.ImageListOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to list images: %w", err)
-	}
+	// Check if image already exists (skip if no-cache is enabled)
+	if !options.NoCache {
+		images, err := cli.ImageList(ctx, types.ImageListOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to list images: %w", err)
+		}
 
-	for _, img := range images {
-		for _, tag := range img.RepoTags {
-			if tag == ImageName {
-				// Image already exists
-				return nil
+		for _, img := range images {
+			for _, tag := range img.RepoTags {
+				if tag == ImageName {
+					// Image already exists
+					return nil
+				}
 			}
 		}
 	}
@@ -51,6 +61,7 @@ func BuildImage(ctx context.Context) error {
 		Dockerfile: "Dockerfile",
 		Tags:       []string{ImageName},
 		Remove:     true,
+		NoCache:    options.NoCache,
 	}
 
 	// Build the image
