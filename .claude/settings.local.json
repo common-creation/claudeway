@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go mod init:*)",
+      "Bash(mkdir:*)",
+      "Bash(go mod:*)",
+      "Bash(go build:*)"
+    ],
+    "deny": []
+  }
+}
