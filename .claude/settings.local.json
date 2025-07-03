@@ -12,7 +12,8 @@
       "Bash(ls:*)",
       "Bash(./claudeway init:*)",
       "Bash(go run:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(chmod:*)"
     ],
     "deny": []
   }
