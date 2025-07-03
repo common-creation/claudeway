@@ -11,7 +11,8 @@
       "Bash(./claudeway image build:*)",
       "Bash(ls:*)",
       "Bash(./claudeway init:*)",
-      "Bash(go run:*)"
+      "Bash(go run:*)",
+      "Bash(find:*)"
     ],
     "deny": []
   }
