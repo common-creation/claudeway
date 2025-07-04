@@ -17,9 +17,6 @@ go.work
 # Binary
 claudeway
 
-# Local configuration
-claudeway.yaml
-
 # IDE
 .vscode/
 .idea/

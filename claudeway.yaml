@@ -1,0 +1,22 @@
+bind:
+  - /var/run/docker.sock:/var/run/docker.sock
+  - ~/.claude.json:~/.claude.json
+  - ~/.claude:~/.claude
+
+copy:
+  - ~/.gitconfig
+  - ~/.ssh
+
+init:
+  - apt update
+  - apt install -y docker.io docker-compose-v2
+  - asdf plugin add nodejs
+  - asdf install nodejs 22.17.0
+  - asdf global nodejs 22.17.0
+  - npm i -g @anthropic-ai/claude-code
+  - asdf plugin add golang
+  - asdf install golang 1.24.2
+  - asdf global golang 1.24.2
+  - go install golang.org/x/tools/gopls@latest
+  - go mod download
+
