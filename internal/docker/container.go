@@ -1,7 +1,6 @@
 package docker
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -15,7 +14,6 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/common-creation/claudeway/internal/config"
 	"github.com/common-creation/claudeway/internal/utils"
 )
@@ -398,133 +396,69 @@ func (m *Manager) GetContainerName() string {
 func (m *Manager) WaitForInitialization(ctx context.Context) error {
 	fmt.Println("Container logs:")
 	
-	// Get logs without following first to see initial output
+	// Start following logs immediately
 	options := types.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
-		Follow:     false,
+		Follow:     true,
 		Timestamps: false,
 	}
 
-	// Print existing logs
 	reader, err := m.client.ContainerLogs(ctx, m.containerName, options)
-	if err != nil {
-		return fmt.Errorf("failed to get container logs: %w", err)
-	}
-	
-	// Check if the container has TTY enabled
-	inspect, err := m.client.ContainerInspect(ctx, m.containerName)
-	if err != nil {
-		return fmt.Errorf("failed to inspect container: %w", err)
-	}
-	
-	// Print initial logs
-	var initialLogs strings.Builder
-	if inspect.Config.Tty {
-		// For TTY mode, just copy the raw stream
-		io.Copy(io.MultiWriter(os.Stdout, &initialLogs), reader)
-	} else {
-		// For non-TTY mode, use stdcopy
-		stdout := io.MultiWriter(os.Stdout, &initialLogs)
-		stderr := io.MultiWriter(os.Stderr, &initialLogs)
-		stdcopy.StdCopy(stdout, stderr, reader)
-	}
-	reader.Close()
-	
-	// Check if already completed
-	if strings.Contains(initialLogs.String(), "Claudeway initialization complete.") {
-		return nil
-	}
-	
-	// Check if already failed
-	if strings.Contains(initialLogs.String(), "Claudeway initialization failed.") {
-		return fmt.Errorf("initialization failed: one or more init commands failed")
-	}
-	
-	// Now follow logs for updates
-	options.Follow = true
-	// Don't use Since to avoid duplicate logs
-	reader, err = m.client.ContainerLogs(ctx, m.containerName, options)
 	if err != nil {
 		return fmt.Errorf("failed to get container logs: %w", err)
 	}
 	defer reader.Close()
 	
-	// Process logs in a simpler way
+	// Channel to signal completion
 	done := make(chan error, 1)
-	hasInitCommands := strings.Contains(initialLogs.String(), "Running initialization commands...")
 	
+	// Start log processing goroutine
 	go func() {
-		if inspect.Config.Tty {
-			// For TTY mode, read byte by byte and accumulate lines
-			buffer := make([]byte, 1024)
-			var lineBuffer strings.Builder
-			
-			for {
-				n, err := reader.Read(buffer)
-				if n > 0 {
-					data := string(buffer[:n])
-					os.Stdout.Write(buffer[:n])
-					lineBuffer.WriteString(data)
-					
-					// Check accumulated buffer for newlines
-					accumulated := lineBuffer.String()
-					lines := strings.Split(accumulated, "\n")
-					for _, line := range lines {
-						if strings.Contains(line, "Claudeway initialization complete.") {
-							done <- nil
-							return
-						}
-						if strings.Contains(line, "Claudeway initialization failed.") {
-							done <- fmt.Errorf("initialization failed: one or more init commands failed")
-							return
-						}
-					}
-				}
+		// Simple byte-by-byte reading with line accumulation
+		buffer := make([]byte, 4096)
+		var accumulated strings.Builder
+		
+		for {
+			n, err := reader.Read(buffer)
+			if n > 0 {
+				// Print to stdout
+				os.Stdout.Write(buffer[:n])
 				
-				if err != nil {
-					if err != io.EOF {
-						done <- err
-					} else {
-						done <- nil
-					}
-					return
-				}
-			}
-		} else {
-			// For non-TTY mode, use scanner
-			scanner := bufio.NewScanner(reader)
-			for scanner.Scan() {
-				line := scanner.Text()
-				fmt.Println(line)
+				// Accumulate for pattern matching
+				accumulated.WriteString(string(buffer[:n]))
+				content := accumulated.String()
 				
-				if strings.Contains(line, "Claudeway initialization complete.") {
+				// Check for completion
+				if strings.Contains(content, "Claudeway initialization complete.") {
 					done <- nil
 					return
 				}
 				
-				if strings.Contains(line, "Claudeway initialization failed.") {
+				// Check for failure
+				if strings.Contains(content, "Claudeway initialization failed.") {
 					done <- fmt.Errorf("initialization failed: one or more init commands failed")
 					return
 				}
 			}
 			
-			if err := scanner.Err(); err != nil && err != io.EOF {
-				done <- err
-			} else {
-				done <- nil
+			if err != nil {
+				// Any error (including EOF) means log stream ended
+				done <- fmt.Errorf("log stream ended unexpectedly")
+				return
 			}
 		}
 	}()
 	
-	// Also check container status periodically
-	ticker := time.NewTicker(500 * time.Millisecond)
+	// Monitor container status
+	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	
 	for {
 		select {
 		case err := <-done:
 			return err
+			
 		case <-ticker.C:
 			// Check if container is still running
 			inspect, err := m.client.ContainerInspect(ctx, m.containerName)
@@ -533,16 +467,10 @@ func (m *Manager) WaitForInitialization(ctx context.Context) error {
 			}
 			
 			if !inspect.State.Running {
-				// Container stopped
-				return fmt.Errorf("container stopped unexpectedly")
+				// Container stopped - this means initialization failed
+				return fmt.Errorf("container stopped unexpectedly (initialization failed)")
 			}
 			
-			// For containers without init commands, check if ready
-			if !hasInitCommands && inspect.State.Running {
-				// Give it a moment to ensure it's fully ready
-				time.Sleep(1 * time.Second)
-				return nil
-			}
 		case <-ctx.Done():
 			return ctx.Err()
 		}

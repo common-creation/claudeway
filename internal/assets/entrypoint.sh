@@ -30,14 +30,19 @@ setup_user() {
             # Create user
             useradd -u "$HOST_UID" -g "$HOST_GID" -m -d "/home/$HOST_USER" -s /bin/bash "$HOST_USER" 2>/dev/null || true
             
+            # Ensure home directory has correct ownership
+            chown "$HOST_UID:$HOST_GID" "/home/$HOST_USER"
+            chmod 755 "/home/$HOST_USER"
+            
             # Setup asdf for the user
             echo '. /opt/asdf/asdf.sh' >> "/home/$HOST_USER/.bashrc"
             echo '. /opt/asdf/completions/asdf.bash' >> "/home/$HOST_USER/.bashrc"
+            chown "$HOST_UID:$HOST_GID" "/home/$HOST_USER/.bashrc"
             
             # Create .tool-versions in user's home if it exists in root
             if [ -f "/root/.tool-versions" ]; then
                 cp "/root/.tool-versions" "/home/$HOST_USER/.tool-versions"
-                chown "$HOST_USER:$HOST_GID" "/home/$HOST_USER/.tool-versions"
+                chown "$HOST_UID:$HOST_GID" "/home/$HOST_USER/.tool-versions"
             fi
             
             # Add user to sudoers
@@ -60,7 +65,37 @@ fi
 expand_path() {
     local path="$1"
     if [[ "$path" == "~/"* ]]; then
-        echo "${HOME}/${path:2}"
+        # For tilde expansion, we need to use the original host user's home
+        if [ -n "$HOST_USER" ]; then
+            # Check common home directory patterns
+            if [ -d "/host/Users/$HOST_USER" ]; then
+                # macOS pattern
+                echo "/Users/$HOST_USER/${path:2}"
+            elif [ -d "/host/home/$HOST_USER" ]; then
+                # Linux pattern
+                echo "/home/$HOST_USER/${path:2}"
+            else
+                # Fallback to current HOME
+                echo "${HOME}/${path:2}"
+            fi
+        else
+            echo "${HOME}/${path:2}"
+        fi
+    else
+        echo "$path"
+    fi
+}
+
+# Function to expand destination path inside container
+expand_dest_path() {
+    local path="$1"
+    if [[ "$path" == "~/"* ]]; then
+        # In container, always use /home/$HOST_USER for tilde expansion
+        if [ -n "$HOST_USER" ]; then
+            echo "/home/$HOST_USER/${path:2}"
+        else
+            echo "${HOME}/${path:2}"
+        fi
     else
         echo "$path"
     fi
@@ -71,21 +106,31 @@ if [ -n "$CLAUDEWAY_COPY" ]; then
     echo "Copying specified files..."
     IFS=';' read -ra COPY_FILES <<< "$CLAUDEWAY_COPY"
     for file in "${COPY_FILES[@]}"; do
-        # Expand path
-        expanded_file=$(expand_path "$file")
+        # Expand source path
+        src_expanded=$(expand_path "$file")
         
-        # Get absolute path
-        if [[ "$expanded_file" = /* ]]; then
-            abs_path="$expanded_file"
+        # Get absolute source path
+        if [[ "$src_expanded" = /* ]]; then
+            src_abs_path="$src_expanded"
         else
-            abs_path="$(pwd)/$expanded_file"
+            src_abs_path="$(pwd)/$src_expanded"
         fi
         
         # Source path in /host
-        src_path="/host$abs_path"
+        src_path="/host$src_abs_path"
+        
+        # Expand destination path
+        dest_expanded=$(expand_dest_path "$file")
+        
+        # Get absolute destination path
+        if [[ "$dest_expanded" = /* ]]; then
+            dest_abs_path="$dest_expanded"
+        else
+            dest_abs_path="$(pwd)/$dest_expanded"
+        fi
         
         # Create parent directory if needed
-        parent_dir=$(dirname "$abs_path")
+        parent_dir=$(dirname "$dest_abs_path")
         if [ ! -d "$parent_dir" ]; then
             mkdir -p "$parent_dir"
         fi
@@ -93,11 +138,16 @@ if [ -n "$CLAUDEWAY_COPY" ]; then
         # Copy the file/directory
         if [ -e "$src_path" ]; then
             if [ -d "$src_path" ]; then
-                cp -r "$src_path" "$abs_path"
-                echo "  Copied directory: $file -> $abs_path"
+                cp -r "$src_path" "$dest_abs_path"
+                echo "  Copied directory: $file -> $dest_abs_path"
             else
-                cp "$src_path" "$abs_path"
-                echo "  Copied file: $file -> $abs_path"
+                cp "$src_path" "$dest_abs_path"
+                echo "  Copied file: $file -> $dest_abs_path"
+            fi
+            
+            # Change ownership to the user if HOST_USER is set
+            if [ -n "$HOST_USER" ] && [ -n "$HOST_UID" ] && [ -n "$HOST_GID" ]; then
+                chown -R "$HOST_UID:$HOST_GID" "$dest_abs_path"
             fi
         else
             echo "  Warning: Source not found: $src_path"
@@ -124,15 +174,5 @@ fi
 touch /tmp/.claudeway_init_complete
 echo "Claudeway initialization complete."
 
-# Execute the main command
-if [ -n "$HOST_UID" ] && [ -n "$HOST_GID" ] && [ -n "$HOST_USER" ]; then
-    echo "Switching to user $HOST_USER..."
-    # Need to ensure the user can access the working directory
-    chown -R "$HOST_USER:$HOST_GID" "$PWD" 2>/dev/null || true
-    # Switch to the host user
-    exec sudo -u "$HOST_USER" -E -H "$@"
-else
-    echo "Running as root (no host user info)..."
-    # Run as root if no host user info
-    exec "$@"
-fi
+# Keep the container running
+tail -f /dev/null
