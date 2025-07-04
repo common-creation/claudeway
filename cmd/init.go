@@ -17,10 +17,12 @@ var (
 )
 
 var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize claudeway configuration",
-	Long:  `Create a default claudeway.yaml configuration file or initialize global configuration with Docker assets.`,
-	RunE:  runInit,
+	Use:           "init",
+	Short:         "Initialize claudeway configuration",
+	Long:          `Create a default claudeway.yaml configuration file or initialize global configuration with Docker assets.`,
+	RunE:          runInit,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func init() {
@@ -29,6 +31,14 @@ func init() {
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
+	if err := runInitInternal(cmd, args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	return nil
+}
+
+func runInitInternal(cmd *cobra.Command, args []string) error {
 	if globalFlag {
 		return initGlobalConfig()
 	}
@@ -73,6 +83,7 @@ func initGlobalConfig() error {
 		}
 		fmt.Printf("Created %s\n", entrypointPath)
 	}
+
 
 	// Create global config if it doesn't exist
 	globalConfigPath := filepath.Join(claudewayDir, "claudeway.yaml")

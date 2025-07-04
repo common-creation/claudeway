@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/mohemohe/claudeway/internal/docker"
@@ -13,7 +14,9 @@ var execCmd = &cobra.Command{
 	Short: "Execute a command in the running claudeway container",
 	Long: `Execute a command in the running claudeway container for the current directory.
 If no command is specified, it will open an interactive bash shell.`,
-	RunE: runExec,
+	RunE:          runExec,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func init() {
@@ -21,6 +24,14 @@ func init() {
 }
 
 func runExec(cmd *cobra.Command, args []string) error {
+	if err := runExecInternal(cmd, args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	return nil
+}
+
+func runExecInternal(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// Create Docker manager

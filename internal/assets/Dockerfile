@@ -3,7 +3,10 @@ FROM ubuntu:24.04
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV ASDF_DIR=/opt/asdf
+ENV ASDF_DATA_DIR=/opt/asdf
 ENV PATH="${ASDF_DIR}/bin:${ASDF_DIR}/shims:${PATH}"
+ENV TMPDIR=/tmp
+ENV HOME=/root
 
 # Install basic dependencies
 RUN apt-get update && apt-get install -y \
@@ -31,7 +34,9 @@ RUN apt-get update && apt-get install -y \
 # Install asdf
 RUN git clone https://github.com/asdf-vm/asdf.git ${ASDF_DIR} --branch v0.14.0 && \
     echo '. /opt/asdf/asdf.sh' >> /etc/bash.bashrc && \
-    echo '. /opt/asdf/completions/asdf.bash' >> /etc/bash.bashrc
+    echo '. /opt/asdf/completions/asdf.bash' >> /etc/bash.bashrc && \
+    echo '. /opt/asdf/asdf.sh' >> /etc/profile && \
+    echo '. /opt/asdf/completions/asdf.bash' >> /etc/profile
 
 # Install commonly used asdf plugins
 RUN . ${ASDF_DIR}/asdf.sh && \
@@ -55,4 +60,4 @@ WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # Default command
-CMD ["/bin/bash"]
+CMD ["/bin/bash", "-l"]

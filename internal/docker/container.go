@@ -1,18 +1,21 @@
 package docker
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/mohemohe/claudeway/internal/config"
 	"github.com/mohemohe/claudeway/internal/utils"
 )
@@ -83,10 +86,63 @@ func (m *Manager) CreateAndStartContainer(ctx context.Context, cfg *config.Confi
 		if strings.HasPrefix(bind, "#") {
 			continue
 		}
+		
+		// Parse source and target from bind string (format: "source:target" or just "path")
+		var sourcePath, targetPath string
+		parts := strings.SplitN(bind, ":", 2)
+		if len(parts) == 2 {
+			sourcePath = parts[0]
+			targetPath = parts[1]
+		} else {
+			sourcePath = bind
+			targetPath = bind
+		}
+		
+		// Expand ~ to home directory for source path
+		if strings.HasPrefix(sourcePath, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("failed to get home directory: %w", err)
+			}
+			sourcePath = filepath.Join(home, sourcePath[2:])
+		}
+		
+		// Get absolute path for source
+		absSourcePath, err := filepath.Abs(sourcePath)
+		if err != nil {
+			return fmt.Errorf("failed to get absolute path for %s: %w", sourcePath, err)
+		}
+		
+		// Resolve symlinks for source path
+		resolvedSourcePath, err := filepath.EvalSymlinks(absSourcePath)
+		if err != nil {
+			// If symlink evaluation fails, use the absolute path
+			resolvedSourcePath = absSourcePath
+		}
+		
+		// For target path, expand ~ to container's home directory
+		if strings.HasPrefix(targetPath, "~/") {
+			// Check if we have host user info
+			hostUser := os.Getenv("USER")
+			if hostUser != "" && os.Getuid() >= 0 {
+				// Use host user's home directory
+				targetPath = filepath.Join("/home", hostUser, targetPath[2:])
+			} else {
+				// Fallback to root
+				targetPath = filepath.Join("/root", targetPath[2:])
+			}
+		}
+		
+		// Get absolute path for target
+		absTargetPath, err := filepath.Abs(targetPath)
+		if err != nil {
+			return fmt.Errorf("failed to get absolute path for %s: %w", targetPath, err)
+		}
+		
 		mounts = append(mounts, mount.Mount{
 			Type:   mount.TypeBind,
-			Source: bind,
-			Target: bind,
+			Source: resolvedSourcePath,
+			Target: absTargetPath,
 		})
 	}
 
@@ -119,18 +175,34 @@ func (m *Manager) CreateAndStartContainer(ctx context.Context, cfg *config.Confi
 		})
 	}
 
-	// Get environment variables
-	env := os.Environ()
+	// Get environment variables - only copy essential ones
+	env := []string{
+		"PATH=/opt/asdf/shims:/opt/asdf/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"ASDF_DIR=/opt/asdf",
+		"ASDF_DATA_DIR=/opt/asdf",
+		"TMPDIR=/tmp",
+		"TERM=xterm-256color",
+		"LANG=C.UTF-8",
+	}
 
 	// Add host user information
 	if uid := os.Getuid(); uid >= 0 {
 		env = append(env, fmt.Sprintf("HOST_UID=%d", uid))
-	}
-	if gid := os.Getgid(); gid >= 0 {
-		env = append(env, fmt.Sprintf("HOST_GID=%d", gid))
-	}
-	if user := os.Getenv("USER"); user != "" {
-		env = append(env, fmt.Sprintf("HOST_USER=%s", user))
+		
+		if gid := os.Getgid(); gid >= 0 {
+			env = append(env, fmt.Sprintf("HOST_GID=%d", gid))
+		}
+		if user := os.Getenv("USER"); user != "" {
+			env = append(env, fmt.Sprintf("HOST_USER=%s", user))
+			// Set HOME for the container user
+			env = append(env, fmt.Sprintf("HOME=/home/%s", user))
+		} else {
+			// Fallback to root if no user info
+			env = append(env, "HOME=/root")
+		}
+	} else {
+		// No UID info, use root
+		env = append(env, "HOME=/root")
 	}
 
 	// Prepare init commands
@@ -203,7 +275,56 @@ func (m *Manager) StopAndRemoveContainer(ctx context.Context) error {
 
 func (m *Manager) ExecInteractive(ctx context.Context, cmd []string) error {
 	if len(cmd) == 0 {
-		cmd = []string{"/bin/bash"}
+		cmd = []string{"/bin/bash", "-l"}
+	}
+
+	// First, ensure user is set up by running the setup_user function
+	setupScript := `
+if [ -n "$HOST_UID" ] && [ -n "$HOST_GID" ] && [ -n "$HOST_USER" ]; then
+    if ! id -u "$HOST_USER" >/dev/null 2>&1; then
+        echo "Creating user $HOST_USER with UID=$HOST_UID GID=$HOST_GID..."
+        if ! getent group "$HOST_GID" >/dev/null 2>&1; then
+            groupadd -g "$HOST_GID" "$HOST_USER" 2>/dev/null || true
+        fi
+        useradd -u "$HOST_UID" -g "$HOST_GID" -m -d "/home/$HOST_USER" -s /bin/bash "$HOST_USER" 2>/dev/null || true
+        echo '. /opt/asdf/asdf.sh' >> "/home/$HOST_USER/.bashrc"
+        echo '. /opt/asdf/completions/asdf.bash' >> "/home/$HOST_USER/.bashrc"
+        if [ -f "/root/.tool-versions" ]; then
+            cp "/root/.tool-versions" "/home/$HOST_USER/.tool-versions"
+            chown "$HOST_USER:$HOST_GID" "/home/$HOST_USER/.tool-versions"
+        fi
+        echo "$HOST_USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$HOST_USER
+        chmod 0440 /etc/sudoers.d/$HOST_USER
+    fi
+fi
+`
+	setupConfig := types.ExecConfig{
+		Cmd:          []string{"/bin/bash", "-c", setupScript},
+		AttachStdout: true,
+		AttachStderr: true,
+		Env: []string{
+			fmt.Sprintf("HOST_UID=%d", os.Getuid()),
+			fmt.Sprintf("HOST_GID=%d", os.Getgid()),
+			fmt.Sprintf("HOST_USER=%s", os.Getenv("USER")),
+		},
+	}
+	
+	setupResp, err := m.client.ContainerExecCreate(ctx, m.containerName, setupConfig)
+	if err == nil {
+		m.client.ContainerExecStart(ctx, setupResp.ID, types.ExecStartCheck{})
+		// Wait a moment for user setup to complete
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Check if we have host user info
+	hostUser := os.Getenv("USER")
+	hostUID := os.Getuid()
+	
+	// If we have host user info, use sudo to switch user
+	if hostUser != "" && hostUID >= 0 {
+		// Prepend sudo command to run as the host user
+		sudoCmd := []string{"sudo", "-u", hostUser, "-E", "-H"}
+		cmd = append(sudoCmd, cmd...)
 	}
 
 	execConfig := types.ExecConfig{
@@ -212,6 +333,11 @@ func (m *Manager) ExecInteractive(ctx context.Context, cmd []string) error {
 		AttachStdout: true,
 		AttachStderr: true,
 		Tty:          true,
+		Env: []string{
+			fmt.Sprintf("HOST_UID=%d", os.Getuid()),
+			fmt.Sprintf("HOST_GID=%d", os.Getgid()),
+			fmt.Sprintf("HOST_USER=%s", os.Getenv("USER")),
+		},
 	}
 
 	execResp, err := m.client.ContainerExecCreate(ctx, m.containerName, execConfig)
@@ -266,4 +392,217 @@ func (m *Manager) ExecInteractive(ctx context.Context, cmd []string) error {
 
 func (m *Manager) GetContainerName() string {
 	return m.containerName
+}
+
+// WaitForInitialization waits for container initialization to complete
+func (m *Manager) WaitForInitialization(ctx context.Context) error {
+	fmt.Println("Container logs:")
+	
+	// Get logs without following first to see initial output
+	options := types.ContainerLogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     false,
+		Timestamps: false,
+	}
+
+	// Print existing logs
+	reader, err := m.client.ContainerLogs(ctx, m.containerName, options)
+	if err != nil {
+		return fmt.Errorf("failed to get container logs: %w", err)
+	}
+	
+	// Check if the container has TTY enabled
+	inspect, err := m.client.ContainerInspect(ctx, m.containerName)
+	if err != nil {
+		return fmt.Errorf("failed to inspect container: %w", err)
+	}
+	
+	// Print initial logs
+	var initialLogs strings.Builder
+	if inspect.Config.Tty {
+		// For TTY mode, just copy the raw stream
+		io.Copy(io.MultiWriter(os.Stdout, &initialLogs), reader)
+	} else {
+		// For non-TTY mode, use stdcopy
+		stdout := io.MultiWriter(os.Stdout, &initialLogs)
+		stderr := io.MultiWriter(os.Stderr, &initialLogs)
+		stdcopy.StdCopy(stdout, stderr, reader)
+	}
+	reader.Close()
+	
+	// Check if already completed
+	if strings.Contains(initialLogs.String(), "Claudeway initialization complete.") {
+		return nil
+	}
+	
+	// Check if already failed
+	if strings.Contains(initialLogs.String(), "Claudeway initialization failed.") {
+		return fmt.Errorf("initialization failed: one or more init commands failed")
+	}
+	
+	// Now follow logs for updates
+	options.Follow = true
+	// Don't use Since to avoid duplicate logs
+	reader, err = m.client.ContainerLogs(ctx, m.containerName, options)
+	if err != nil {
+		return fmt.Errorf("failed to get container logs: %w", err)
+	}
+	defer reader.Close()
+	
+	// Process logs in a simpler way
+	done := make(chan error, 1)
+	hasInitCommands := strings.Contains(initialLogs.String(), "Running initialization commands...")
+	
+	go func() {
+		if inspect.Config.Tty {
+			// For TTY mode, read byte by byte and accumulate lines
+			buffer := make([]byte, 1024)
+			var lineBuffer strings.Builder
+			
+			for {
+				n, err := reader.Read(buffer)
+				if n > 0 {
+					data := string(buffer[:n])
+					os.Stdout.Write(buffer[:n])
+					lineBuffer.WriteString(data)
+					
+					// Check accumulated buffer for newlines
+					accumulated := lineBuffer.String()
+					lines := strings.Split(accumulated, "\n")
+					for _, line := range lines {
+						if strings.Contains(line, "Claudeway initialization complete.") {
+							done <- nil
+							return
+						}
+						if strings.Contains(line, "Claudeway initialization failed.") {
+							done <- fmt.Errorf("initialization failed: one or more init commands failed")
+							return
+						}
+					}
+				}
+				
+				if err != nil {
+					if err != io.EOF {
+						done <- err
+					} else {
+						done <- nil
+					}
+					return
+				}
+			}
+		} else {
+			// For non-TTY mode, use scanner
+			scanner := bufio.NewScanner(reader)
+			for scanner.Scan() {
+				line := scanner.Text()
+				fmt.Println(line)
+				
+				if strings.Contains(line, "Claudeway initialization complete.") {
+					done <- nil
+					return
+				}
+				
+				if strings.Contains(line, "Claudeway initialization failed.") {
+					done <- fmt.Errorf("initialization failed: one or more init commands failed")
+					return
+				}
+			}
+			
+			if err := scanner.Err(); err != nil && err != io.EOF {
+				done <- err
+			} else {
+				done <- nil
+			}
+		}
+	}()
+	
+	// Also check container status periodically
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-ticker.C:
+			// Check if container is still running
+			inspect, err := m.client.ContainerInspect(ctx, m.containerName)
+			if err != nil {
+				return fmt.Errorf("failed to inspect container: %w", err)
+			}
+			
+			if !inspect.State.Running {
+				// Container stopped
+				return fmt.Errorf("container stopped unexpectedly")
+			}
+			
+			// For containers without init commands, check if ready
+			if !hasInitCommands && inspect.State.Running {
+				// Give it a moment to ensure it's fully ready
+				time.Sleep(1 * time.Second)
+				return nil
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// waitForInitializationFile uses file-based approach to check for initialization completion
+func (m *Manager) waitForInitializationFile(ctx context.Context, timeout time.Duration) error {
+	start := time.Now()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			// Check if initialization is complete by looking for the marker file
+			execConfig := types.ExecConfig{
+				Cmd:          []string{"test", "-f", "/tmp/.claudeway_init_complete"},
+				AttachStdout: false,
+				AttachStderr: false,
+			}
+
+			execResp, err := m.client.ContainerExecCreate(ctx, m.containerName, execConfig)
+			if err != nil {
+				return fmt.Errorf("failed to create exec for init check: %w", err)
+			}
+
+			inspectResp, err := m.client.ContainerExecInspect(ctx, execResp.ID)
+			if err != nil {
+				return fmt.Errorf("failed to inspect exec: %w", err)
+			}
+
+			// Start the exec
+			if err := m.client.ContainerExecStart(ctx, execResp.ID, types.ExecStartCheck{}); err != nil {
+				return fmt.Errorf("failed to start exec: %w", err)
+			}
+
+			// Wait for the exec to complete
+			for {
+				inspectResp, err = m.client.ContainerExecInspect(ctx, execResp.ID)
+				if err != nil {
+					return fmt.Errorf("failed to inspect exec: %w", err)
+				}
+				if !inspectResp.Running {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+
+			// Exit code 0 means the file exists
+			if inspectResp.ExitCode == 0 {
+				return nil
+			}
+
+			// Check timeout
+			if time.Since(start) > timeout {
+				return fmt.Errorf("initialization timeout after %v", timeout)
+			}
+		}
+	}
 }

@@ -3,16 +3,19 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/mohemohe/claudeway/internal/docker"
 )
 
 var downCmd = &cobra.Command{
-	Use:   "down",
-	Short: "Stop and remove the claudeway container",
-	Long:  `Stop the running claudeway container for the current directory and remove it.`,
-	RunE:  runDown,
+	Use:           "down",
+	Short:         "Stop and remove the claudeway container",
+	Long:          `Stop the running claudeway container for the current directory and remove it.`,
+	RunE:          runDown,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func init() {
@@ -20,6 +23,14 @@ func init() {
 }
 
 func runDown(cmd *cobra.Command, args []string) error {
+	if err := runDownInternal(cmd, args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	return nil
+}
+
+func runDownInternal(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// Create Docker manager

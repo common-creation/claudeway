@@ -41,6 +41,21 @@ func BuildImageWithOptions(ctx context.Context, options BuildOptions) error {
 		for _, img := range images {
 			for _, tag := range img.RepoTags {
 				if tag == ImageName {
+					// Check if we're using embedded assets
+					configDir := config.GetConfigDir()
+					libDir := filepath.Join(configDir, "claudeway", "lib")
+					dockerfilePath := filepath.Join(libDir, "Dockerfile")
+					entrypointPath := filepath.Join(libDir, "entrypoint.sh")
+					
+					// If external files don't exist, we need to rebuild with embedded assets
+					_, dockerfileErr := os.Stat(dockerfilePath)
+					_, entrypointErr := os.Stat(entrypointPath)
+					if os.IsNotExist(dockerfileErr) || os.IsNotExist(entrypointErr) {
+						fmt.Println("Rebuilding image with updated embedded assets...")
+						options.NoCache = true
+						break
+					}
+					
 					// Image already exists
 					return nil
 				}
@@ -140,6 +155,7 @@ func createBuildContextFromFiles(dockerfilePath, entrypointPath string) (io.Read
 		return nil, fmt.Errorf("failed to add entrypoint.sh: %w", err)
 	}
 
+
 	return &buf, nil
 }
 
@@ -180,6 +196,7 @@ func createBuildContextEmbedded() (io.Reader, error) {
 	if _, err := tw.Write([]byte(entrypointContent)); err != nil {
 		return nil, fmt.Errorf("failed to write entrypoint content: %w", err)
 	}
+
 
 	return &buf, nil
 }

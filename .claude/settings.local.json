@@ -13,7 +13,11 @@
       "Bash(./claudeway init:*)",
       "Bash(go run:*)",
       "Bash(find:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker logs:*)",
+      "Bash(./claudeway down)",
+      "Bash(./claudeway:*)"
     ],
     "deny": []
   }

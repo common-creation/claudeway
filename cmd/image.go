@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/mohemohe/claudeway/internal/docker"
 	"github.com/spf13/cobra"
@@ -15,10 +16,12 @@ var imageCmd = &cobra.Command{
 }
 
 var buildCmd = &cobra.Command{
-	Use:   "build",
-	Short: "Build Docker image",
-	Long:  `Build or rebuild the Docker image for claudeway containers`,
-	RunE:  runBuild,
+	Use:           "build",
+	Short:         "Build Docker image",
+	Long:          `Build or rebuild the Docker image for claudeway containers`,
+	RunE:          runBuild,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 var noCache bool
@@ -30,6 +33,14 @@ func init() {
 }
 
 func runBuild(cmd *cobra.Command, args []string) error {
+	if err := runBuildInternal(cmd, args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	return nil
+}
+
+func runBuildInternal(cmd *cobra.Command, args []string) error {
 	fmt.Println("Building Docker image...")
 	
 	ctx := context.Background()

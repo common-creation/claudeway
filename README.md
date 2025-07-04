@@ -1,132 +1,79 @@
-# claudeway
+<p align="center">
+  <img src="./assets/claudeway_logo.png" />
+</p>
+<h2 align="center">
+  claudeway - The Ultimate Defense: Securing Claude Code Execution
+</h2>
 
-A CLI tool for running AI agents like Claude Code safely in Docker containers with proper directory bindings and environment isolation.
+----
 
-## Features
+Claude CodeをはじめとするAIエージェントを安全にDockerコンテナ内で実行するためのCLIツールです。
 
-- Bind mount current directory with the same path inside the container
-- Support for additional bind mounts and file copies
-- Persistent containers per directory
-- Environment variable inheritance
-- Ubuntu-based container with asdf for easy runtime management
-- XDG Base Directory compliant configuration
-- Customizable Docker assets (Dockerfile and entrypoint script)
+[English version available](README.en.md)
 
-## Installation
+## インストール
 
 ```bash
 go install github.com/mohemohe/claudeway@latest
 ```
 
-## Quick Start
+## 使い方
 
-1. Initialize global configuration and Docker assets:
+### 初期設定
 
 ```bash
+# グローバル設定とDockerアセットを初期化
 claudeway init --global
-```
 
-This creates customizable Docker assets in `$XDG_CONFIG_HOME/claudeway/lib/`:
-- `Dockerfile`: Base image configuration
-- `entrypoint.sh`: Container startup script
-
-2. Create a project configuration (optional):
-
-```bash
+# プロジェクトごとの設定を初期化
 claudeway init
 ```
 
-3. Start a container for your project:
+### 基本的な使い方
 
 ```bash
+# コンテナを起動して対話的シェルに入る
 claudeway up
-```
 
-## Usage
+# すでに起動しているコンテナの対話的シェルに入る
+claudeway exec
 
-### Initialize configuration
-
-Create Docker assets and global configuration:
-
-```bash
-claudeway init --global
-```
-
-Create a project-specific `claudeway.yaml`:
-
-```bash
-claudeway init
-```
-
-### Start container
-
-Start a container for the current directory and enter it:
-
-```bash
-claudeway up
-```
-
-### Stop container
-
-Stop and remove the container:
-
-```bash
+# コンテナを停止・削除
 claudeway down
 ```
 
-### Execute commands
-
-Execute a command in the running container:
+### その他のコマンド
 
 ```bash
-claudeway exec npm test
+# Dockerイメージをビルド
+claudeway image build
+
+# キャッシュなしでイメージをビルド
+claudeway image build --no-cache
 ```
 
-## Configuration
+## 設定ファイル
 
-Configuration files are loaded from:
-1. `$XDG_CONFIG_HOME/claudeway/claudeway.yaml` (global)
-2. `./claudeway.yaml` (project-specific)
-
-Example `claudeway.yaml`:
+`claudeway.yaml` の形式：
 
 ```yaml
-# Commands to run on container startup
-init:
-  - npm ci
-  - go mod download
-
-# Additional directories to bind mount
+# ボリュームマウント設定
 bind:
-  - /opt/bin
+  - /var/run/docker.sock:/var/run/docker.sock  # Dockerソケット
+  - ~/.claude.json:~/.claude.json               # Claude設定
+  - ~/.claude:~/.claude                         # Claudeディレクトリ
 
-# Files to copy into the container
+# コンテナ内にコピーするファイル
 copy:
-  - ~/.zshrc
-  - ~/.gitconfig
+  - ~/.gitconfig                                 # Git設定
+  - ~/.ssh                                       # SSH鍵
+
+# 初期化コマンド（コンテナ起動時に実行）
+init:
+  - curl -Ls get.docker.com | sh                # Docker インストール
+  - asdf plugin add nodejs                       # Node.js プラグイン追加
+  - asdf install nodejs 22.17.0                  # Node.js インストール
+  - asdf global nodejs 22.17.0                   # デフォルトバージョン設定
+  - npm i -g @anthropic-ai/claude-code          # Claude Code インストール
 ```
 
-### Configuration Priority
-
-- Global configuration takes precedence for `init` commands
-- Both global and local configurations are merged for `bind` and `copy` entries
-
-## How it Works
-
-1. **Container Naming**: Each directory gets a unique container name based on its path hash (`claudeway-XXXX`)
-2. **Path Preservation**: The current directory is mounted at the same path inside the container
-3. **File Copying**: Files specified in `copy` are mounted read-only under `/host` and copied on startup
-4. **Environment**: All environment variables are passed through to the container
-5. **Docker Assets**: 
-   - First checks `$XDG_CONFIG_HOME/claudeway/lib/` for custom Dockerfile and entrypoint.sh
-   - Falls back to embedded assets if not found
-   - Run `claudeway init --global` to create customizable assets
-
-## Requirements
-
-- Docker
-- Go 1.22+ (for building from source)
-
-## License
-
-[WTFPL](http://www.wtfpl.net/) - Do What The Fuck You Want To Public License

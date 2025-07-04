@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/mohemohe/claudeway/internal/config"
@@ -16,6 +17,8 @@ var upCmd = &cobra.Command{
 	Long: `Start a Docker container with the current directory mounted and enter it interactively.
 If the container is already running, it will exec into it instead.`,
 	RunE: runUp,
+	SilenceUsage: true,
+	SilenceErrors: true,
 }
 
 func init() {
@@ -23,6 +26,15 @@ func init() {
 }
 
 func runUp(cmd *cobra.Command, args []string) error {
+	// Wrap the main logic to handle errors
+	if err := runUpInternal(cmd, args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	return nil
+}
+
+func runUpInternal(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// Load configuration
@@ -68,11 +80,33 @@ func runUp(cmd *cobra.Command, args []string) error {
 		if err := manager.CreateAndStartContainer(ctx, cfg); err != nil {
 			return fmt.Errorf("failed to start container: %w", err)
 		}
+
+		// Wait for initialization to complete
+		fmt.Println("Waiting for container initialization...")
+		if err := manager.WaitForInitialization(ctx); err != nil {
+			// If initialization failed, stop and remove the container
+			fmt.Fprintf(os.Stderr, "Initialization failed: %v\n", err)
+			fmt.Println("Cleaning up failed container...")
+			if cleanupErr := manager.StopAndRemoveContainer(ctx); cleanupErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to clean up container: %v\n", cleanupErr)
+			}
+			return err
+		}
 	}
 
-	// Exec into the container
+	// Try to exec into the container
 	fmt.Printf("Entering container %s...\n", manager.GetContainerName())
-	if err := manager.ExecInteractive(ctx, []string{"/bin/bash"}); err != nil {
+	if err := manager.ExecInteractive(ctx, []string{"/bin/bash", "-l"}); err != nil {
+		// If interactive exec fails (e.g., in non-TTY environments), provide alternative instructions
+		if strings.Contains(err.Error(), "raw terminal") || strings.Contains(err.Error(), "operation not supported") {
+			fmt.Println("\nInteractive shell is not available in this environment.")
+			fmt.Printf("Container '%s' is running successfully.\n", manager.GetContainerName())
+			fmt.Println("\nYou can connect to the container using:")
+			fmt.Printf("  docker exec -it %s /bin/bash -l\n", manager.GetContainerName())
+			fmt.Println("\nOr use claudeway exec command:")
+			fmt.Println("  ./claudeway exec /bin/bash")
+			return nil
+		}
 		return fmt.Errorf("failed to exec into container: %w", err)
 	}
 
