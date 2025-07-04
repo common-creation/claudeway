@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/claudeway_logo.png" />
+  <img width="320" src="./assets/claudeway_logo.png" />
 </p>
 <h2 align="center">
   claudeway - The Ultimate Defense: Securing Claude Code Execution
@@ -7,9 +7,15 @@
 
 ----
 
-Claude CodeをはじめとするAIエージェントを安全にDockerコンテナ内で実行するためのCLIツールです。
+Claude CodeをはじめとするAIコーディングエージェントを安全にDockerコンテナ内で実行するためのCLIツールです。
 
 [English version available](README.en.md)
+
+## 仕組み
+
+カレントディレクトリをDockerコンテナにbind mountして起動します。  
+このとき、一部を除きホストの環境変数を引き継ぎ（dotenvフレンドリー）、設定ファイルに応じてコンテナを初期化、ホストと同一のUID・GIDでexecします。  
+これにより、万が一AIコーディングエージェントが `rm -rf --no-preserve-root` を実行したとしても、ホストに致命的な影響がないようにします。
 
 ## インストール
 
@@ -77,3 +83,4 @@ init:
   - npm i -g @anthropic-ai/claude-code          # Claude Code インストール
 ```
 
+実際の例は [`claudeway.yaml`](./claudeway.yaml) を確認してください。
