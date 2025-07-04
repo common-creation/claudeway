@@ -12,8 +12,8 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
-	"github.com/mohemohe/claudeway/internal/assets"
-	"github.com/mohemohe/claudeway/internal/config"
+	"github.com/common-creation/claudeway/internal/assets"
+	"github.com/common-creation/claudeway/internal/config"
 )
 
 type BuildOptions struct {

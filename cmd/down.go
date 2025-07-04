@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/mohemohe/claudeway/internal/docker"
+	"github.com/common-creation/claudeway/internal/docker"
 )
 
 var downCmd = &cobra.Command{

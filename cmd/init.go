@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/mohemohe/claudeway/internal/assets"
-	"github.com/mohemohe/claudeway/internal/config"
+	"github.com/common-creation/claudeway/internal/assets"
+	"github.com/common-creation/claudeway/internal/config"
 )
 
 var (

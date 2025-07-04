@@ -1,4 +1,4 @@
-module github.com/mohemohe/claudeway
+module github.com/common-creation/claudeway
 
 go 1.22
 

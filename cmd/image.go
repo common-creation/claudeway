@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mohemohe/claudeway/internal/docker"
+	"github.com/common-creation/claudeway/internal/docker"
 	"github.com/spf13/cobra"
 )
 

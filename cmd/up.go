@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/mohemohe/claudeway/internal/config"
-	"github.com/mohemohe/claudeway/internal/docker"
+	"github.com/common-creation/claudeway/internal/config"
+	"github.com/common-creation/claudeway/internal/docker"
 )
 
 var upCmd = &cobra.Command{

@@ -2,7 +2,7 @@
   <img width="320" src="./assets/claudeway_logo.png" />
 </p>
 <h2 align="center">
-  claudeway - The Ultimate Defense: Securing Claude Code Execution
+  claudeway - Answer to the Ultimate Question of Securing Claude Code Execution
 </h2>
 
 ----
@@ -15,12 +15,12 @@ A CLI tool for safely running AI coding agents like Claude Code inside a Docker 
 
 It starts a Docker container by bind-mounting the current directory.  
 At this time, it inherits the host's environment variables (dotenv friendly) with a few exceptions, initializes the container according to the configuration file, and executes with the same UID and GID as the host.  
-This prevents catastrophic damage to the host, even if the AI coding agent were to execute `rm -rf --no-preserve-root`.
+This prevents catastrophic damage to the host, even if the AI coding agent were to execute `rm -rf --no-preserve-root /`.
 
 ## Installation
 
 ```bash
-go install github.com/mohemohe/claudeway@latest
+go install github.com/common-creation/claudeway@latest
 ```
 
 ## Usage

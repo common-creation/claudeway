@@ -16,8 +16,8 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/mohemohe/claudeway/internal/config"
-	"github.com/mohemohe/claudeway/internal/utils"
+	"github.com/common-creation/claudeway/internal/config"
+	"github.com/common-creation/claudeway/internal/utils"
 )
 
 const ImageName = "claudeway:latest"

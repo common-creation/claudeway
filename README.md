@@ -2,7 +2,7 @@
   <img width="320" src="./assets/claudeway_logo.png" />
 </p>
 <h2 align="center">
-  claudeway - The Ultimate Defense: Securing Claude Code Execution
+  claudeway - Answer to the Ultimate Question of Securing Claude Code Execution
 </h2>
 
 ----
@@ -15,12 +15,12 @@ Claude CodeをはじめとするAIコーディングエージェントを安全�
 
 カレントディレクトリをDockerコンテナにbind mountして起動します。  
 このとき、一部を除きホストの環境変数を引き継ぎ（dotenvフレンドリー）、設定ファイルに応じてコンテナを初期化、ホストと同一のUID・GIDでexecします。  
-これにより、万が一AIコーディングエージェントが `rm -rf --no-preserve-root` を実行したとしても、ホストに致命的な影響がないようにします。
+これにより、万が一AIコーディングエージェントが `rm -rf --no-preserve-root /` を実行したとしても、ホストに致命的な影響がないようにします。
 
 ## インストール
 
 ```bash
-go install github.com/mohemohe/claudeway@latest
+go install github.com/common-creation/claudeway@latest
 ```
 
 ## 使い方
